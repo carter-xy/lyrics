@@ -31,8 +31,9 @@ object BetterLyrics {
     private const val TTML_LYRICS_PATH = "getLyrics"
     private const val KUGOU_LYRICS_PATH = "kugou/getLyrics"
     private const val PORTATO_LYRICS_PATH = "qq/getLyrics"
-    private const val MAX_RESPONSE_UNWRAP_DEPTH = 2
+    private const val MAX_RESPONSE_UNWRAP_DEPTH = 6
     private val ttmlRootRegex = Regex("""<(?:[A-Za-z_][\w.-]*:)?tt(?:\s|>)""", RegexOption.IGNORE_CASE)
+    private val timedLineRegex = Regex("""^\[(?:\d{1,3}:[0-5]\d(?:[.:]\d{1,3})?|\d{1,8},\d{1,8})].*\S.*$""")
 
     private data class DecodedLyrics(
         val content: String,
@@ -146,14 +147,14 @@ object BetterLyrics {
 
     private fun decodeLyrics(responseText: String): DecodedLyrics? {
         val raw = responseText.removePrefix("\uFEFF")
-        if (isTtmlPayload(raw)) return DecodedLyrics(content = raw, score = null)
+        if (isSupportedPayload(raw)) return DecodedLyrics(content = raw, score = null)
 
-        val root = jsonFormat.parseToJsonElement(responseText)
+        val root = jsonFormat.parseToJsonElement(raw)
         val response =
             runCatching {
                 jsonFormat.decodeFromJsonElement(TTMLResponse.serializer(), root)
             }.getOrNull()
-        if (response != null && isTtmlPayload(response.ttml)) {
+        if (response != null && isSupportedPayload(response.ttml)) {
             return DecodedLyrics(content = response.ttml, score = response.score)
         }
 
@@ -184,7 +185,7 @@ object BetterLyrics {
             is JsonPrimitive -> {
                 val content = element.contentOrNull ?: return null
                 when {
-                    isTtmlPayload(content) -> DecodedLyrics(content = content, score = null)
+                    isSupportedPayload(content) -> DecodedLyrics(content = content, score = null)
                     depth < MAX_RESPONSE_UNWRAP_DEPTH -> {
                         val nested = runCatching { jsonFormat.parseToJsonElement(content) }.getOrNull() ?: return null
                         decodeLyricsElement(nested, depth + 1)
@@ -200,6 +201,18 @@ object BetterLyrics {
 
     private fun isTtmlPayload(value: String): Boolean =
         ttmlRootRegex.containsMatchIn(value.take(MAX_TTML_ROOT_SCAN_LENGTH))
+
+    private fun isSupportedPayload(value: String): Boolean {
+        val content = value.removePrefix("\uFEFF").trim()
+        if (isTtmlPayload(content)) return true
+        if (QRCParser.isQrc(content)) {
+            return runCatching { QRCParser.parseQrc(content).isNotEmpty() }.getOrDefault(false)
+        }
+        return content.lineSequence().any { timedLineRegex.matches(it.trim()) }
+    }
+
+    internal fun decodeLyricsContent(responseText: String): String? =
+        runCatching { decodeLyrics(responseText)?.content }.getOrNull()
 
     private fun buildRequestLog(
         endpoint: String,

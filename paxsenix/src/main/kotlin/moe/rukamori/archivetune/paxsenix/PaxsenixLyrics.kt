@@ -408,15 +408,27 @@ object PaxsenixLyrics {
             ) ?: throw IllegalStateException("Lyrics unavailable from Paxsenix for $title")
         }
 
-    private fun convertAppleMusicToLrc(response: AppleMusicLyricsResponse): String =
+    internal fun convertAppleMusicToLrc(response: AppleMusicLyricsResponse): String =
         response.content.joinToString("\n") { line ->
-            val minutes = line.timestamp / 1_000 / 60
-            val seconds = (line.timestamp / 1_000) % 60
-            val hundredths = (line.timestamp % 1_000) / 10
-            val time = String.format(Locale.US, "[%02d:%02d.%02d]", minutes, seconds, hundredths)
-            val text = line.text.joinToString(" ") { it.text.trim() }
-            "$time$text"
+            val words = line.text.filter { it.text.isNotBlank() }
+            val starts = words.map { it.timestamp }
+            val hasCompleteWordTiming = words.isNotEmpty() &&
+                starts.all { it != null && it >= line.timestamp } &&
+                starts.filterNotNull().zipWithNext().all { (a, b) -> b > a }
+            val text = if (hasCompleteWordTiming) {
+                words.joinToString(" ") { word -> "${formatAppleMusicTime(word.timestamp!!, '<', '>')}${word.text.trim()}" }
+            } else {
+                words.joinToString(" ") { it.text.trim() }
+            }
+            "${formatAppleMusicTime(line.timestamp, '[', ']')}$text"
         }
+
+    private fun formatAppleMusicTime(milliseconds: Long, open: Char, close: Char): String {
+        val minutes = milliseconds / 60_000
+        val seconds = (milliseconds / 1_000) % 60
+        val fraction = milliseconds % 1_000
+        return String.format(Locale.US, "%c%02d:%02d.%03d%c", open, minutes, seconds, fraction, close)
+    }
 
     suspend fun getAllLyrics(
         title: String,

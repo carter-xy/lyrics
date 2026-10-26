@@ -18,12 +18,16 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.CancellationException
 import moe.rukamori.archivetune.simpmusic.models.LyricsData
 import moe.rukamori.archivetune.simpmusic.models.SimpMusicApiResponse
 import kotlin.math.abs
 
 object SimpMusicLyrics {
     private const val BASE_URL = "https://api-lyrics.simpmusic.org/v1/"
+    private const val MAX_DURATION_DIFFERENCE_SECONDS = 20
+    private val lineTime = Regex("""\[\d{1,3}:[0-5]\d(?:[.:]\d{1,3})?]""")
+    private val wordTime = Regex("""<\d{1,3}:[0-5]\d(?:[.:]\d{1,3})?>""")
 
     private val client by lazy {
         HttpClient(CIO) {
@@ -68,7 +72,43 @@ object SimpMusicLyrics {
             } else {
                 emptyList()
             }
-        }.getOrDefault(emptyList())
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            emptyList()
+        }
+
+    internal fun selectLyrics(tracks: List<LyricsData>, duration: Int): String? =
+        matchingTracks(tracks, duration).firstNotNullOfOrNull(::preferredLyrics)
+
+    internal fun selectAllLyrics(tracks: List<LyricsData>, duration: Int): List<String> {
+        val seen = HashSet<String>()
+        val matching = matchingTracks(tracks, duration)
+        return (matching.mapNotNull { validRich(it.richSyncLyrics) } +
+            matching.mapNotNull { validSynced(it.syncedLyrics) } +
+            matching.mapNotNull { validPlain(it.plainLyrics) })
+            .filter(seen::add)
+            .take(8)
+    }
+
+    private fun matchingTracks(tracks: List<LyricsData>, duration: Int): List<LyricsData> =
+        tracks.filter { track ->
+            duration <= 0 || track.duration == null || track.duration <= 0 ||
+                abs(track.duration - duration) <= MAX_DURATION_DIFFERENCE_SECONDS
+        }.let { eligible ->
+            if (duration <= 0) eligible
+            else eligible.sortedBy { track ->
+                track.duration?.takeIf { it > 0 }?.let { abs(it - duration) } ?: Int.MAX_VALUE
+            }
+        }
+
+    private fun preferredLyrics(track: LyricsData): String? =
+        validRich(track.richSyncLyrics) ?: validSynced(track.syncedLyrics) ?: validPlain(track.plainLyrics)
+
+    private fun validRich(value: String?): String? = value?.trim()?.takeIf { lineTime.containsMatchIn(it) && wordTime.containsMatchIn(it) }
+
+    private fun validSynced(value: String?): String? = value?.trim()?.takeIf(lineTime::containsMatchIn)
+
+    private fun validPlain(value: String?): String? = value?.trim()?.takeIf(String::isNotBlank)
 
     suspend fun getLyrics(
         videoId: String,
@@ -81,20 +121,7 @@ object SimpMusicLyrics {
                 throw IllegalStateException("Lyrics unavailable")
             }
 
-            val bestMatch =
-                if (duration > 0 && tracks.size > 1) {
-                    tracks.minByOrNull { track ->
-                        abs((track.duration ?: 0) - duration)
-                    }
-                } else {
-                    tracks.firstOrNull()
-                }
-
-            val lyrics =
-                bestMatch?.syncedLyrics ?: bestMatch?.plainLyrics
-                    ?: throw IllegalStateException("Lyrics unavailable")
-
-            lyrics
+            selectLyrics(tracks, duration) ?: throw IllegalStateException("Lyrics unavailable")
         }
 
     suspend fun getAllLyrics(
@@ -103,28 +130,6 @@ object SimpMusicLyrics {
         callback: (String) -> Unit,
     ) {
         val tracks = getLyricsByVideoId(videoId)
-        var count = 0
-        var plain = 0
-
-        val sortedTracks =
-            if (duration > 0) {
-                tracks.sortedBy { abs((it.duration ?: 0) - duration) }
-            } else {
-                tracks
-            }
-
-        sortedTracks.forEach { track ->
-            if (count <= 4) {
-                if (track.syncedLyrics != null && abs((track.duration ?: 0) - duration) <= 5) {
-                    count++
-                    callback(track.syncedLyrics)
-                }
-                if (track.plainLyrics != null && abs((track.duration ?: 0) - duration) <= 5 && plain == 0) {
-                    count++
-                    plain++
-                    callback(track.plainLyrics)
-                }
-            }
-        }
+        selectAllLyrics(tracks, duration).forEach(callback)
     }
 }
