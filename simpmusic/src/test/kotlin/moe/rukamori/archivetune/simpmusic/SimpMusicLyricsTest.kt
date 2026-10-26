@@ -18,10 +18,16 @@ class SimpMusicLyricsTest {
     @Test fun unknownDurationAndModerateDriftRemainEligible() {
         val unknown = LyricsData(duration = null, richSyncLyrics = rich)
         val close = LyricsData(duration = 188, syncedLyrics = synced)
-        assertEquals(synced, SimpMusicLyrics.selectLyrics(listOf(unknown, close), 180))
+        assertEquals(rich, SimpMusicLyrics.selectLyrics(listOf(unknown, close), 180))
         assertEquals(listOf(rich, synced), SimpMusicLyrics.selectAllLyrics(listOf(unknown, close), 180))
         assertEquals(rich, SimpMusicLyrics.selectLyrics(listOf(unknown), 180))
         assertEquals(rich, SimpMusicLyrics.selectLyrics(listOf(unknown), 0))
+    }
+
+    @Test fun richTimingWinsAcrossTracksEvenWhenPlainTrackIsCloser() {
+        val plain = LyricsData(duration = 180, plainLyrics = "Hello world")
+        val wordTimed = LyricsData(duration = 184, richSyncLyrics = rich)
+        assertEquals(rich, SimpMusicLyrics.selectLyrics(listOf(plain, wordTimed), 180))
     }
 
     @Test fun malformedRichAndWrongDurationAreNotSelected() {

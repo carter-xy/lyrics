@@ -77,8 +77,12 @@ object SimpMusicLyrics {
             emptyList()
         }
 
-    internal fun selectLyrics(tracks: List<LyricsData>, duration: Int): String? =
-        matchingTracks(tracks, duration).firstNotNullOfOrNull(::preferredLyrics)
+    internal fun selectLyrics(tracks: List<LyricsData>, duration: Int): String? {
+        val matching = matchingTracks(tracks, duration)
+        return matching.firstNotNullOfOrNull { validRich(it.richSyncLyrics) }
+            ?: matching.firstNotNullOfOrNull { validSynced(it.syncedLyrics) }
+            ?: matching.firstNotNullOfOrNull { validPlain(it.plainLyrics) }
+    }
 
     internal fun selectAllLyrics(tracks: List<LyricsData>, duration: Int): List<String> {
         val seen = HashSet<String>()
@@ -100,9 +104,6 @@ object SimpMusicLyrics {
                 track.duration?.takeIf { it > 0 }?.let { abs(it - duration) } ?: Int.MAX_VALUE
             }
         }
-
-    private fun preferredLyrics(track: LyricsData): String? =
-        validRich(track.richSyncLyrics) ?: validSynced(track.syncedLyrics) ?: validPlain(track.plainLyrics)
 
     private fun validRich(value: String?): String? = value?.trim()?.takeIf { lineTime.containsMatchIn(it) && wordTime.containsMatchIn(it) }
 
