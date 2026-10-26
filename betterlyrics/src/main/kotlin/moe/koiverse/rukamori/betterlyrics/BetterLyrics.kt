@@ -199,8 +199,10 @@ object BetterLyrics {
         }
     }
 
-    private fun isTtmlPayload(value: String): Boolean =
-        ttmlRootRegex.containsMatchIn(value.take(MAX_TTML_ROOT_SCAN_LENGTH))
+    private fun isTtmlPayload(value: String): Boolean {
+        val head = value.trimStart().take(MAX_TTML_ROOT_SCAN_LENGTH)
+        return head.startsWith('<') && ttmlRootRegex.containsMatchIn(head)
+    }
 
     private fun isSupportedPayload(value: String): Boolean {
         val content = value.removePrefix("\uFEFF").trim()
