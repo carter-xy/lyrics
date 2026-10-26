@@ -1,4 +1,4 @@
-package moe.koiverse.rukamori.betterlyrics
+package moe.rukamori.archivetune.betterlyrics
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
